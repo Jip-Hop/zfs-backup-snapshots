@@ -1,12 +1,13 @@
 #!/bin/bash
-# Only tested with Solaris 11
+# Only tested with Debian 11 (TrueNAS SCALE)
 # This script will mount the latest snapshot for each zfs filesytem currently mounted on the system into the below directory
-backupDirectory="/networker"
+backupDirectory="/tmp/zfs_backup_snapshots"
+mkdir -p $backupDirectory
 
 # requirements
 # =============================================
 # check for GNU version of find
-type -P gfind &>/dev/null || { echo "We require the GNU version of find to be installed and aliased as 'gfind'. Aborting script."; exit 1; }
+type -P find &>/dev/null || { echo "We require the GNU version of find to be installed and aliased as 'find'. Aborting script."; exit 1; }
 
 # check to make sure backupDirectory exists
 stat "${backupDirectory}" &>/dev/null
@@ -23,7 +24,7 @@ fi
 # usage: zfs_backup_cleanup backupDirectory
 function zfs_backup_cleanup() {
         # get all filesystems mounted within the backup directory
-        fs=( $(cat /etc/mnttab | cut -f2 | grep "${1}") )
+        fs=( $(tac /etc/mtab | cut -d " " -f 2 | grep "${1}") )
 
         # umount said filesystems
         for i in ${fs[@]}; do
@@ -31,7 +32,7 @@ function zfs_backup_cleanup() {
         done
 
         # delete empty directories from within the backup directory
-        gfind "${1}" -mindepth 1 -maxdepth 1 -type d -empty -delete
+        find "${1}" -type d -empty -delete
 }
 
 # gets the name of the newest snapshot given a zfs filesystem
@@ -91,12 +92,13 @@ function mount_latest_snap() {
                 return 1
         fi
 
-        # replace filesystem slashes with underscores for use as the mount directory
-        mountpath=${backupDirectory}/$(echo ${fs} | tr '/' '_')
+        # mountpath may be inside a previously mounted snapshot
+        mountpath=${backupDirectory}/${fs}
 
         # mount to backup directory using a bind filesystem
-        mkdir "${mountpath}"
-        mount -F lofs "${sourcepath}" "${mountpath}"
+        mkdir -p "${mountpath}"
+        echo "mount ${sourcepath} => ${mountpath}"
+        mount --bind --read-only "${sourcepath}" "${mountpath}"
         return 0
 }
 
@@ -105,8 +107,6 @@ function usage() {
         echo "The following commands are supported:
    cleanup: Unmounts everything from the backup directory
      mount: Mounts the latest snapshot for every ZFS filesystem to the backup directory
-mount-root: Mounts the latest snapshot for the root of the current boot environment
- mount-all: Performs cleanup, then mounts all filesystems including root to the backup directory
       help: You're looking at it!"
         return 0
 }
@@ -119,54 +119,15 @@ function cleanup() {
 
 function mountOthers() {
         # get list of all non-root zfs filesystems on the box not including the ROOT since that has duplicate mountpoints
-        filesystems=( $(zfs list -H -o name | egrep -v "^rpool/ROOT.*") )
+        # on TrueNAS SCALE the root pool is at boot-pool/ROOT, ensure egrep matches also in this case
+        # order by shallowest mountpoint first (determined by number of slashes)
+        # TODO: perhaps filter here, exclude if mountpoint doesn't contain "/" (like "none" or "legacy")
+        filesystems=( $(zfs list -H -o name,mountpoint | awk '{print gsub("/","/", $2), $1}' | sort -n | cut -d' ' -f2- | egrep -v "(^boot-pool\/ROOT.*)|(^rpool\/ROOT.*)") )
 
         for fs in "${filesystems[@]}"; do
                 mount_latest_snap "${fs}" "${backupDirectory}"
         done
         return 0
-}
-
-# mounts currently active root and var filesystems
-function mount-root() {
-        # get current root environment filesystem
-        root_running="$(beadm list | perl -nle 'print "$1" if /(solaris.*?)\s+N.*/')"
-
-        rootfs="rpool/ROOT/${root_running}"
-
-        varfs="rpool/ROOT/${root_running}/var"
-
-        local errFlag=0
-
-        mount_latest_snap "${rootfs}" "${backupDirectory}"
-        if [[ $? != 0 ]]; then
-                errFlag=1
-        fi
-
-        mount_latest_snap "${varfs}" "${backupDirectory}"
-        if [[ $? != 0 ]]; then
-                errFlag=1
-        fi
-
-        return $errFlag
-}
-
-function mount-all() {
-        local errFlag=0
-        # cleanup crap from previous runs
-        cleanup
-        if [[ $? != 0 ]]; then
-                errFlag=1
-        fi
-        mount-root
-        if [[ $? != 0 ]]; then
-                errFlag=1
-        fi
-        mountOthers
-        if [[ $? != 0 ]]; then
-                errFlag=1
-        fi
-        return ${errFlag}
 }
 
 # ==========================================
@@ -177,12 +138,6 @@ if [[ $1 == "cleanup" ]]; then
         exit $?
 elif [[ $1 == "mount" ]]; then
         mountOthers
-        exit $?
-elif [[ $1 == "mount-root" ]]; then
-        mount-root
-        exit $?
-elif [[ $1 == "mount-all" ]]; then
-        mount-all
         exit $?
 elif [[ $1 == "help" ]]; then
         usage
