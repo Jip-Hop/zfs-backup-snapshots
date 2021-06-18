@@ -2,23 +2,22 @@
 # Only tested with Debian 11 (TrueNAS SCALE)
 # This script will mount the latest snapshot for each zfs filesytem currently mounted on the system into the below directory
 backupDirectory="/tmp/zfs_backup_snapshots"
-mkdir -p $backupDirectory
 
 # requirements
 # =============================================
 # check for GNU version of find
 type -P find &>/dev/null || { echo "We require the GNU version of find to be installed and aliased as 'find'. Aborting script."; exit 1; }
 
-# check to make sure backupDirectory exists
-stat "${backupDirectory}" &>/dev/null
-if [[ $? == 1 ]]; then
-        echo "The backup directory specified does not exist. Please create and try again: ${backupDirectory}"
-        exit 1
-fi
-
-
 # functions
 # =============================================
+
+function usage() {
+        echo "The following commands are supported:
+   cleanup: Unmounts everything from the backup directory
+     mount: Mounts the latest snapshot for every ZFS filesystem to the backup directory
+      help: You're looking at it!"
+        return 0
+}
 
 # umounts and cleans up the backup directory
 # usage: zfs_backup_cleanup backupDirectory
@@ -102,15 +101,6 @@ function mount_latest_snap() {
         return 0
 }
 
-
-function usage() {
-        echo "The following commands are supported:
-   cleanup: Unmounts everything from the backup directory
-     mount: Mounts the latest snapshot for every ZFS filesystem to the backup directory
-      help: You're looking at it!"
-        return 0
-}
-
 function cleanup() {
         zfs_backup_cleanup "${backupDirectory}"
         return 0
@@ -118,6 +108,8 @@ function cleanup() {
 
 
 function mountOthers() {
+        # ensure backupDirectory exists
+        mkdir -p $backupDirectory
         # get list of all non-root zfs filesystems on the box not including the ROOT since that has duplicate mountpoints
         # on TrueNAS SCALE the root pool is at boot-pool/ROOT, ensure egrep matches also in this case
         # order by shallowest mountpoint first (determined by number of slashes)
