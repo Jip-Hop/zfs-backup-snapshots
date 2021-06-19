@@ -14,10 +14,10 @@ type -P find &>/dev/null || { echo "We require the GNU version of find to be ins
 
 function usage() {
         echo "The following commands are supported:
-   cleanup: Unmounts everything from the backup directory
-            Example: $0 cleanup /tmp/test
      mount: Mounts latest snapshot of specified dataset to the backup directory
             Example: $0 mount /tmp/test data/test
+   cleanup: Unmounts everything from the backup directory
+            Example: $0 cleanup /tmp/test
       help: You're looking at it!"
         return 0
 }
