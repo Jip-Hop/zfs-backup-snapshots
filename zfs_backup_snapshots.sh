@@ -116,7 +116,7 @@ function mount_dataset() {
         # get list of all zfs filesystems under $ZFS_DATASET
         # exclude if mountpoint "legacy" and "none" mountpoint
         # order by shallowest mountpoint first (determined by number of slashes)
-        filesystems=( $(zfs list $ZFS_DATASET -r -H -o name,mountpoint | grep '[^legacy|^none]$' | awk '{print gsub("/","/", $2), $1}' | sort -n | cut -d' ' -f2-) )
+        filesystems=( $(zfs list $ZFS_DATASET -r -H -o name,mountpoint | egrep -v "(legacy)$|(none)$" | awk '{print gsub("/","/", $2), $1}' | sort -n | cut -d' ' -f2-) )
 
         for fs in "${filesystems[@]}"; do
                 mount_latest_snap "${fs}" "${BACKUP_DIRECTORY}"
