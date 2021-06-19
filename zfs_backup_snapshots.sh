@@ -1,7 +1,8 @@
 #!/bin/bash
 # Only tested with Debian 11 (TrueNAS SCALE)
-# This script will mount the latest snapshot for each zfs filesytem currently mounted on the system into the below directory
-backupDirectory="/tmp/zfs_backup_snapshots"
+# This script will mount the latest snapshot of specified dataset to the backup directory
+BACKUP_DIRECTORY=$2
+ZFS_DATASET=$3
 
 # requirements
 # =============================================
@@ -14,13 +15,15 @@ type -P find &>/dev/null || { echo "We require the GNU version of find to be ins
 function usage() {
         echo "The following commands are supported:
    cleanup: Unmounts everything from the backup directory
-     mount: Mounts the latest snapshot for every ZFS filesystem to the backup directory
+            Example: $0 cleanup /tmp/test
+     mount: Mounts latest snapshot of specified dataset to the backup directory
+            Example: $0 mount /tmp/test data/test
       help: You're looking at it!"
         return 0
 }
 
 # umounts and cleans up the backup directory
-# usage: zfs_backup_cleanup backupDirectory
+# usage: zfs_backup_cleanup BACKUP_DIRECTORY
 function zfs_backup_cleanup() {
         # get all filesystems mounted within the backup directory
         fs=( $(tac /etc/mtab | cut -d " " -f 2 | grep "${1}") )
@@ -70,9 +73,9 @@ function zfs_snapshot_mountpoint() {
 }
 
 # mounts latest snapshot in directory
-# usage: mount_latest_snap filesystem backupdirectory
+# usage: mount_latest_snap filesystem BACKUP_DIRECTORY
 function mount_latest_snap() {
-        backupDirectory="${2}"
+        BACKUP_DIRECTORY="${2}"
         fs="${1}"
 
         # get name of latest snapshot
@@ -92,7 +95,7 @@ function mount_latest_snap() {
         fi
 
         # mountpath may be inside a previously mounted snapshot
-        mountpath=${backupDirectory}/${fs}
+        mountpath=${BACKUP_DIRECTORY}/${fs}
 
         # mount to backup directory using a bind filesystem
         mkdir -p "${mountpath}"
@@ -102,22 +105,21 @@ function mount_latest_snap() {
 }
 
 function cleanup() {
-        zfs_backup_cleanup "${backupDirectory}"
+        zfs_backup_cleanup "${BACKUP_DIRECTORY}"
         return 0
 }
 
 
-function mountOthers() {
-        # ensure backupDirectory exists
-        mkdir -p $backupDirectory
-        # get list of all non-root zfs filesystems on the box not including the ROOT since that has duplicate mountpoints
-        # on TrueNAS SCALE the root pool is at boot-pool/ROOT, ensure egrep matches also in this case
+function mount_dataset() {
+        # ensure BACKUP_DIRECTORY exists
+        mkdir -p $BACKUP_DIRECTORY
+        # get list of all zfs filesystems under $ZFS_DATASET
+        # exclude if mountpoint "legacy" and "none" mountpoint
         # order by shallowest mountpoint first (determined by number of slashes)
-        # TODO: perhaps filter here, exclude if mountpoint doesn't contain "/" (like "none" or "legacy")
-        filesystems=( $(zfs list -H -o name,mountpoint | awk '{print gsub("/","/", $2), $1}' | sort -n | cut -d' ' -f2- | egrep -v "(^boot-pool\/ROOT.*)|(^rpool\/ROOT.*)") )
+        filesystems=( $(zfs list $ZFS_DATASET -r -H -o name,mountpoint | grep '[^legacy|^none]$' | awk '{print gsub("/","/", $2), $1}' | sort -n | cut -d' ' -f2-) )
 
         for fs in "${filesystems[@]}"; do
-                mount_latest_snap "${fs}" "${backupDirectory}"
+                mount_latest_snap "${fs}" "${BACKUP_DIRECTORY}"
         done
         return 0
 }
@@ -125,11 +127,11 @@ function mountOthers() {
 # ==========================================
 # arguments parsing
 
-if [[ $1 == "cleanup" ]]; then
+if [[ $1 == "cleanup" && -n $BACKUP_DIRECTORY ]]; then
         cleanup
         exit $?
-elif [[ $1 == "mount" ]]; then
-        mountOthers
+elif [[ $1 == "mount" && -n $BACKUP_DIRECTORY && -n $ZFS_DATASET ]]; then
+        mount_dataset
         exit $?
 elif [[ $1 == "help" ]]; then
         usage
